@@ -1,0 +1,5 @@
+{
+  "name": "tuff",
+  "version": "1.0.0",
+  "description": "Durable step function library for LLM data pipelines. Steps cached to SQLite — re-run resumes from the first uncached step. Concurrency, retry, budget tracking built in. Mix LLM API calls, headless Claude Code, CLI commands, scripts — any async work."
+}
