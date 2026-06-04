@@ -1,17 +1,17 @@
 ---
 name: tuff
 description: >-
-  Build durable, crash-recoverable data pipelines with tuff-lil-unit.
+  Build resumable, crash-recoverable data pipelines with tuff-lil-unit.
   Use when: building multi-step AI pipelines, fan-out patterns, crash recovery,
   resume from crash, structured DB output, batch processing, concurrent API calls,
   or progress tracking.
-  Triggers: "tuff pipeline", "durable pipeline", "LLM orchestration",
+  Triggers: "tuff pipeline", "durable pipeline", "resumable pipeline", "LLM orchestration",
   "crash-recoverable workflow", "step memoization", "fan-out LLM calls".
 ---
 
 # tuff
 
-tuff-lil-unit is a TypeScript library for building durable data pipelines. Every step's result is cached to SQLite — if the process crashes or you re-run, it resumes from the first uncached step. Built-in concurrency control, retry, and batch DB persistence.
+tuff-lil-unit is a TypeScript library for building resumable data pipelines. Every step's result is cached to SQLite — if the process crashes or you re-run, it resumes from the first uncached step. Built-in concurrency control, retry, and batch DB persistence.
 
 `npm i tuff-lil-unit`
 
@@ -91,7 +91,7 @@ curl -s https://api.openai.com/v1/models \
 - **API keys** — `ctx.model.anthropic` requires `ANTHROPIC_API_KEY` and `ctx.model.openai` requires `OPENAI_API_KEY` in `.env`. Add `--env-file=.env` to the node command or use `dotenv`.
 - **Progress script** — always create one for pipelines with significant fan-out. Users will want it even if they don't ask. See `references/architecture.md` for the query pattern.
 - **Cache invalidation** — warn users that cached step results persist even when step logic changes. They need `force: true` or stage-level `force` to invalidate.
-- **Concurrency values** — Default to 20 for all providers, then tell the user what you've set and why, and ask if they'd like to adjust. Anthropic and OpenAI have no concurrent request cap — limits are RPM/TPM windows, so higher concurrency is fine if the user has headroom. Claude Code agents (`ctx.agent.claudeCode`) have been tested at 60+ concurrent steps. Shell commands and other services vary — flag these specifically and invite input.
+- **Concurrency values** — Library default is 5 (conservative for LLM rate limits). Tell the user what you've set and why, and invite adjustment. LLM APIs can typically handle 10–20 if the user has rate-limit headroom. Claude Code agents (`ctx.agent.claudeCode`) tolerate high concurrency (60+ tested). Shell commands and external services vary — flag these specifically.
 - **Table design** — one table per entity (sources, analyses, reports), not per phase. Phases write to tables; tables outlive phases.
 - **Use `.mjs` for pipelines** — runs directly with `node`, no build step or `tsx` dependency. The library ships `.d.ts` files so editors still provide full type intelligence. Only use `.ts` if the project already has a TS toolchain.
 
@@ -110,7 +110,7 @@ await tuff('run-id', {
 
 ### ctx.step(id, fn, opts?)
 
-Durable step — cached to SQLite, skipped on resume.
+Resumable step — cached to SQLite, skipped on resume.
 
 ```ts
 const data = await ctx.step('fetch-data', () => fetchAll());
@@ -149,38 +149,43 @@ Step IDs in loops must include a unique identifier — `fetch-${url.id}` not `'f
 
 Any async work runs inside `ctx.step()` — shell commands, HTTP fetches, file processing, anything. Three built-in providers add LLM-specific conveniences (structured output, token tracking, retry).
 
-**ctx.model.anthropic** / **ctx.model.openai** — Direct API calls. Providers are plain async functions — put them inside `ctx.step()` for durability and per-step usage tracking.
+**ctx.model.anthropic** / **ctx.model.openai** — Direct API calls returning `ProviderResult<T>`. Destructure `{ output }` to get the value. Wrap in `ctx.step()` for memoization and per-step usage tracking.
 
 ```ts
-// Plain text — inside a step for durability
-const text = await ctx.step('summarize', () =>
+// Plain text
+const { output: text } = await ctx.step('summarize', () =>
   ctx.model.anthropic('claude-sonnet-4-5', prompt)
 );
 
 // Structured output — pass a Zod schema
-const data = await ctx.step('extract', () =>
+const { output: data } = await ctx.step('extract', () =>
   ctx.model.openai<Summary>('gpt-5-mini', prompt, { schema: SummarySchema })
 );
 
-// Additional options pass through to the AI SDK
-await ctx.step('analyse', () =>
+// Additional options
+const { output } = await ctx.step('analyse', () =>
   ctx.model.anthropic('claude-sonnet-4-5', prompt, {
     temperature: 0.2,
     system: 'You are a data analyst.',
   })
 );
 
-// Inside ctx.upsert — no extra step() needed, upsert wraps each item
+// Inside ctx.upsert — unwrap output; upsert stores the return value as the row
 await ctx.upsert(items, {
   key: (item) => `analyse-${item.id}`,
-  run: (item) => ctx.model.anthropic('claude-sonnet-4-5', buildPrompt(item)),
+  run: async (item) => {
+    const { output } = await ctx.model.anthropic('claude-sonnet-4-5', buildPrompt(item));
+    return output;
+  },
 });
 ```
 
 **ctx.agent.claudeCode** (experimental) — Spawns headless `claude -p` subprocess.
 
 ```ts
-await ctx.step('refactor', () => ctx.agent.claudeCode('claude-sonnet-4-5', prompt));
+const { output } = await ctx.step('refactor', () =>
+  ctx.agent.claudeCode('claude-sonnet-4-5', prompt)
+);
 ```
 
 > **Subscription warning:** Consumes the user's Claude Code CLI subscription quota. Fan-out patterns can burn through a usage window quickly. Confirm with the user before using this provider, especially at scale.
@@ -205,6 +210,7 @@ Direct better-sqlite3 access for custom queries.
 
 - **Serializable returns only** — step results stored as JSON. No Dates, Buffers, class instances. Use ISO strings, plain objects.
 - **Unique step IDs** — within a stage, IDs must be unique. In loops: `` `fetch-${url}` ``.
+- **No nested steps** — `ctx.step()` throws if called inside another step or upsert callback. Provider calls inside a step are fine; nesting `ctx.step()` inside `ctx.step()` is not.
 - **Composite PK upsert** — pass all primary key columns in the row object so INSERT … ON CONFLICT matches correctly.
 
 ## Reference files

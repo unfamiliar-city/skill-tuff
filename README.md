@@ -2,7 +2,7 @@
 
 ![tuff-lil-unit](https://raw.githubusercontent.com/unfamiliar-city/tuff-lil-unit/main/assets/tuff.jpg)
 
-A Claude Code skill for building durable AI pipelines with [tuff-lil-unit](https://github.com/unfamiliar-city/tuff-lil-unit).
+A Claude Code skill for building resumable AI pipelines with [tuff-lil-unit](https://github.com/unfamiliar-city/tuff-lil-unit).
 
 Tell Claude what you want to build. Tuff handles the rest — crash recovery, concurrency, retry, and a queryable SQLite database of everything that happened.
 

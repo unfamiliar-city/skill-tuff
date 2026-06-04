@@ -19,7 +19,7 @@ Budget is checked between steps, not mid-step. A single expensive call can overs
 ### Per-step budget
 
 ```ts
-await ctx.step('summarize', () =>
+const { output } = await ctx.step('summarize', () =>
   ctx.model.anthropic('claude-sonnet-4-5', prompt, {
     maxTokens: 4096,         // cap output tokens (API-enforced)
     maxInputTokens: 50_000,  // pre-call estimate (~chars/4), refuses if over
